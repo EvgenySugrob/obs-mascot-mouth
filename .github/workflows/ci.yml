@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: >-
+          cmake -S . -B build/core -G Ninja
+          -DMASCOT_BUILD_PLUGIN=OFF
+          -DMASCOT_BUILD_TESTS=ON
+          -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build/core
+      - name: Test
+        run: ctest --test-dir build/core --output-on-failure
