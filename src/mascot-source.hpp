@@ -1,5 +1,6 @@
 #pragma once
 
+#include "blink-state.hpp"
 #include "mouth-state.hpp"
 
 #include <atomic>
@@ -54,12 +55,17 @@ private:
   std::atomic<float> latest_level_db_{-96.0F};
   std::atomic<int> meter_channels_{0};
   std::atomic<bool> render_open_{false};
+  std::atomic<bool> render_blink_{false};
+  bool blinking_enabled_ = true;
   std::mutex state_mutex_;
   MouthState mouth_{};
+  BlinkState blink_{};
 
   mutable std::mutex image_mutex_;
   Image closed_{};
   Image open_{};
+  Image closed_blink_{};
+  Image open_blink_{};
 };
 
 }

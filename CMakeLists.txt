@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(obs-mascot-mouth VERSION 0.1.0 LANGUAGES CXX)
+project(obs-mascot-mouth VERSION 0.2.0 LANGUAGES CXX)
 
 option(MASCOT_BUILD_PLUGIN "Build the OBS plugin" ON)
 option(MASCOT_BUILD_TESTS "Build the dependency-free state-machine tests" ON)
 
 add_library(mascot-mouth-core STATIC
+  src/blink-state.cpp
+  src/blink-state.hpp
   src/mouth-state.cpp
   src/mouth-state.hpp
 )

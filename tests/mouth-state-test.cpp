@@ -1,9 +1,12 @@
+#include "blink-state.hpp"
 #include "mouth-state.hpp"
 
 #include <cassert>
 #include <cmath>
 #include <iostream>
 
+using mascot::BlinkSettings;
+using mascot::BlinkState;
 using mascot::MouthSettings;
 using mascot::MouthState;
 
@@ -51,6 +54,29 @@ static void sanitizes_settings_and_bad_samples()
   assert(!mouth.is_open());
 }
 
+static void blink_uses_interval_and_duration()
+{
+  BlinkState blink(BlinkSettings{1000.0F, 1000.0F, 100.0F});
+  blink.update(999.0F);
+  assert(!blink.is_blinking());
+  blink.update(1.0F);
+  assert(blink.is_blinking());
+  blink.update(99.0F);
+  assert(blink.is_blinking());
+  blink.update(1.0F);
+  assert(!blink.is_blinking());
+}
+
+static void blink_sanitizes_settings()
+{
+  BlinkState blink(BlinkSettings{-10.0F, 20.0F, 0.0F});
+  assert(blink.settings().minimum_interval_ms == 250.0F);
+  assert(blink.settings().maximum_interval_ms == 250.0F);
+  assert(blink.settings().duration_ms == 40.0F);
+  blink.update(std::nanf(""));
+  assert(!blink.is_blinking());
+}
+
 int main()
 {
   opens_at_threshold();
@@ -58,6 +84,8 @@ int main()
   closes_only_after_delay();
   speech_resets_close_timer();
   sanitizes_settings_and_bad_samples();
-  std::cout << "All mouth-state tests passed\n";
+  blink_uses_interval_and_duration();
+  blink_sanitizes_settings();
+  std::cout << "All core tests passed\n";
   return 0;
 }

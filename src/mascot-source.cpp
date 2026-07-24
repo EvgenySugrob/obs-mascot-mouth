@@ -9,9 +9,15 @@ namespace {
 constexpr const char *kAudioSource = "audio_source";
 constexpr const char *kClosedImage = "closed_image";
 constexpr const char *kOpenImage = "open_image";
+constexpr const char *kClosedBlinkImage = "closed_blink_image";
+constexpr const char *kOpenBlinkImage = "open_blink_image";
 constexpr const char *kOpenThreshold = "open_threshold_db";
 constexpr const char *kCloseThreshold = "close_threshold_db";
 constexpr const char *kCloseDelay = "close_delay_ms";
+constexpr const char *kBlinkEnabled = "blink_enabled";
+constexpr const char *kBlinkMinimumInterval = "blink_minimum_interval_ms";
+constexpr const char *kBlinkMaximumInterval = "blink_maximum_interval_ms";
+constexpr const char *kBlinkDuration = "blink_duration_ms";
 
 constexpr const char *kImageFilter = "PNG Files (*.png);;All Files (*.*)";
 
@@ -48,6 +54,8 @@ MascotSource::~MascotSource()
     std::lock_guard<std::mutex> lock(image_mutex_);
     free_image(closed_);
     free_image(open_);
+    free_image(closed_blink_);
+    free_image(open_blink_);
   }
   obs_leave_graphics();
 }
@@ -128,13 +136,24 @@ void MascotSource::update(obs_data_t *settings)
   mouth_settings.open_threshold_db = static_cast<float>(obs_data_get_double(settings, kOpenThreshold));
   mouth_settings.close_threshold_db = static_cast<float>(obs_data_get_double(settings, kCloseThreshold));
   mouth_settings.close_delay_ms = static_cast<float>(obs_data_get_int(settings, kCloseDelay));
+  BlinkSettings blink_settings;
+  blink_settings.minimum_interval_ms =
+      static_cast<float>(obs_data_get_int(settings, kBlinkMinimumInterval));
+  blink_settings.maximum_interval_ms =
+      static_cast<float>(obs_data_get_int(settings, kBlinkMaximumInterval));
+  blink_settings.duration_ms = static_cast<float>(obs_data_get_int(settings, kBlinkDuration));
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     mouth_.configure(mouth_settings);
+    blink_.configure(blink_settings);
+    blinking_enabled_ = obs_data_get_bool(settings, kBlinkEnabled);
+    render_blink_.store(false, std::memory_order_relaxed);
   }
 
   load_image(closed_, obs_data_get_string(settings, kClosedImage));
   load_image(open_, obs_data_get_string(settings, kOpenImage));
+  load_image(closed_blink_, obs_data_get_string(settings, kClosedBlinkImage));
+  load_image(open_blink_, obs_data_get_string(settings, kOpenBlinkImage));
   attach_meter(obs_data_get_string(settings, kAudioSource));
 }
 
@@ -156,20 +175,34 @@ void MascotSource::meter_updated(void *data, const float magnitude[MAX_AUDIO_CHA
 void MascotSource::tick(float seconds)
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
-  mouth_.update(latest_level_db_.load(std::memory_order_relaxed), seconds * 1000.0F);
+  const float elapsed_ms = seconds * 1000.0F;
+  mouth_.update(latest_level_db_.load(std::memory_order_relaxed), elapsed_ms);
+  if (blinking_enabled_)
+    blink_.update(elapsed_ms);
   render_open_.store(mouth_.is_open(), std::memory_order_relaxed);
+  render_blink_.store(blinking_enabled_ && blink_.is_blinking(), std::memory_order_relaxed);
 }
 
 void MascotSource::render(gs_effect_t *effect)
 {
   std::lock_guard<std::mutex> lock(image_mutex_);
   const bool is_open = render_open_.load(std::memory_order_relaxed);
-  Image &selected = is_open ? open_ : closed_;
-  Image &fallback = is_open ? closed_ : open_;
-  gs_image_file *image = image_file(selected);
-  if (!selected.initialized || !image->texture)
-    image = image_file(fallback);
-  if (!image->texture)
+  const bool is_blinking = render_blink_.load(std::memory_order_relaxed);
+  Image &normal = is_open ? open_ : closed_;
+  Image &other_normal = is_open ? closed_ : open_;
+  Image &blink = is_open ? open_blink_ : closed_blink_;
+  Image &other_blink = is_open ? closed_blink_ : open_blink_;
+  Image *candidates[] = {is_blinking ? &blink : &normal, &normal,
+                         is_blinking ? &other_blink : &other_normal, &other_normal};
+  gs_image_file *image = nullptr;
+  for (Image *candidate : candidates) {
+    gs_image_file *file = image_file(*candidate);
+    if (candidate->initialized && file->texture) {
+      image = file;
+      break;
+    }
+  }
+  if (!image)
     return;
 
   gs_eparam_t *parameter = gs_effect_get_param_by_name(effect, "image");
@@ -180,13 +213,15 @@ void MascotSource::render(gs_effect_t *effect)
 uint32_t MascotSource::width() const
 {
   std::lock_guard<std::mutex> lock(image_mutex_);
-  return std::max(image_file(closed_)->cx, image_file(open_)->cx);
+  return std::max({image_file(closed_)->cx, image_file(open_)->cx,
+                   image_file(closed_blink_)->cx, image_file(open_blink_)->cx});
 }
 
 uint32_t MascotSource::height() const
 {
   std::lock_guard<std::mutex> lock(image_mutex_);
-  return std::max(image_file(closed_)->cy, image_file(open_)->cy);
+  return std::max({image_file(closed_)->cy, image_file(open_)->cy,
+                   image_file(closed_blink_)->cy, image_file(open_blink_)->cy});
 }
 
 bool MascotSource::enum_audio_sources(void *data, obs_source_t *source)
@@ -210,6 +245,10 @@ obs_properties_t *MascotSource::properties(void *)
                           kImageFilter, nullptr);
   obs_properties_add_path(properties, kOpenImage, obs_module_text("OpenImage"), OBS_PATH_FILE,
                           kImageFilter, nullptr);
+  obs_properties_add_path(properties, kClosedBlinkImage, obs_module_text("ClosedBlinkImage"),
+                          OBS_PATH_FILE, kImageFilter, nullptr);
+  obs_properties_add_path(properties, kOpenBlinkImage, obs_module_text("OpenBlinkImage"),
+                          OBS_PATH_FILE, kImageFilter, nullptr);
 
   obs_properties_add_float_slider(properties, kOpenThreshold, obs_module_text("OpenThreshold"),
                                   -60.0, 0.0, 1.0);
@@ -218,6 +257,13 @@ obs_properties_t *MascotSource::properties(void *)
   obs_properties_add_int_slider(properties, kCloseDelay, obs_module_text("CloseDelay"), 0, 500, 10);
   obs_properties_add_text(properties, "threshold_hint", obs_module_text("ThresholdHint"),
                           OBS_TEXT_INFO);
+  obs_properties_add_bool(properties, kBlinkEnabled, obs_module_text("BlinkEnabled"));
+  obs_properties_add_int_slider(properties, kBlinkMinimumInterval,
+                                obs_module_text("BlinkMinimumInterval"), 250, 30000, 100);
+  obs_properties_add_int_slider(properties, kBlinkMaximumInterval,
+                                obs_module_text("BlinkMaximumInterval"), 250, 60000, 100);
+  obs_properties_add_int_slider(properties, kBlinkDuration, obs_module_text("BlinkDuration"), 40,
+                                1000, 10);
   return properties;
 }
 
@@ -226,9 +272,15 @@ void MascotSource::defaults(obs_data_t *settings)
   obs_data_set_default_string(settings, kAudioSource, "");
   obs_data_set_default_string(settings, kClosedImage, "");
   obs_data_set_default_string(settings, kOpenImage, "");
+  obs_data_set_default_string(settings, kClosedBlinkImage, "");
+  obs_data_set_default_string(settings, kOpenBlinkImage, "");
   obs_data_set_default_double(settings, kOpenThreshold, -35.0);
   obs_data_set_default_double(settings, kCloseThreshold, -42.0);
   obs_data_set_default_int(settings, kCloseDelay, 120);
+  obs_data_set_default_bool(settings, kBlinkEnabled, true);
+  obs_data_set_default_int(settings, kBlinkMinimumInterval, 3500);
+  obs_data_set_default_int(settings, kBlinkMaximumInterval, 6500);
+  obs_data_set_default_int(settings, kBlinkDuration, 120);
 }
 
 obs_source_info MascotSource::source_info()

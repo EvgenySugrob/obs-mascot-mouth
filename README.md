@@ -5,19 +5,23 @@ closed-mouth and open-mouth PNG images using the level of an existing OBS audio
 source. It does not open the microphone a second time and does not require a
 captured helper window.
 
-## Current MVP
+## Version 0.2.0
 
 - native C++17 OBS input source;
 - audio source selection from the source properties;
-- two transparent PNG images;
+- separate open-eye images for closed and open mouth;
+- optional closed-eye images for closed and open mouth;
+- automatic blinking with randomized intervals;
+- configurable blink interval and duration;
 - separate open and close thresholds (hysteresis);
 - configurable close delay;
 - Russian and English UI;
-- dependency-free tests for the mouth state machine.
+- dependency-free tests for the mouth and blink state machines.
 
-The two PNG files should use the same canvas size and character position. If
-their sizes differ, the OBS source reports the largest width and height and
-draws both images from the top-left corner.
+All PNG files should use the same canvas size and character position. If their
+sizes differ, the OBS source reports the largest width and height and draws the
+images from the top-left corner. Blink images are optional and fall back to the
+corresponding open-eye images.
 
 ## Use in OBS
 
@@ -25,9 +29,11 @@ draws both images from the top-left corner.
 2. Add a new source and select **Mascot Mouth** / **Говорящий маскот**.
 3. Select the microphone source.
 4. Select the closed-mouth and open-mouth PNG files.
-5. Start with `-35 dB` for opening, `-42 dB` for closing, and `120 ms` for the
+5. Optionally select the two blink PNG files.
+6. Start with `-35 dB` for opening, `-42 dB` for closing, and `120 ms` for the
    close delay.
-6. Raise the open threshold toward `0 dB` if background noise opens the mouth.
+7. Start with a blink interval of `3500–6500 ms` and a duration of `120 ms`.
+8. Raise the open threshold toward `0 dB` if background noise opens the mouth.
    Lower it toward `-60 dB` if normal speech is not detected.
 
 Audio filters placed on the selected OBS source are included in the level seen

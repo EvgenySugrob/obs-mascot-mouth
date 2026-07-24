@@ -103,10 +103,10 @@ $dll.FullName
 
 ## Install
 
-Close OBS Studio before copying the files.
+Close OBS Studio before copying the files. Run PowerShell as Administrator.
 
 ```powershell
-$plugin = "$env:APPDATA\obs-studio\plugins\obs-mascot-mouth"
+$plugin = "$env:ProgramData\obs-studio\plugins\obs-mascot-mouth"
 
 New-Item -ItemType Directory -Force "$plugin\bin\64bit"
 New-Item -ItemType Directory -Force "$plugin\data\locale"
