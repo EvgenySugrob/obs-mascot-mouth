@@ -54,17 +54,26 @@ private:
   obs_volmeter_t *meter_ = nullptr;
   std::atomic<float> latest_level_db_{-96.0F};
   std::atomic<int> meter_channels_{0};
-  std::atomic<bool> render_open_{false};
+  std::atomic<int> render_mouth_level_{0};
   std::atomic<bool> render_blink_{false};
+  std::atomic<float> render_offset_y_{0.0F};
+  std::atomic<float> render_scale_{1.0F};
   bool blinking_enabled_ = true;
+  bool motion_enabled_ = true;
+  float motion_offset_pixels_ = 4.0F;
+  float motion_scale_percent_ = 1.5F;
+  float motion_impulse_ = 0.0F;
+  MouthLevel previous_mouth_level_ = MouthLevel::Closed;
   std::mutex state_mutex_;
   MouthState mouth_{};
   BlinkState blink_{};
 
   mutable std::mutex image_mutex_;
   Image closed_{};
+  Image medium_{};
   Image open_{};
   Image closed_blink_{};
+  Image medium_blink_{};
   Image open_blink_{};
 };
 

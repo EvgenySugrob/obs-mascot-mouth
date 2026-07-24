@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Added half-open mouth and matching blink image slots
+- Added a wide-open volume threshold
+- Added microphone-level smoothing
+- Added voice-reactive vertical movement and scale
+- Preserved fallback support for incomplete image sets
+- Added three-level mouth state tests
+
 ## 0.2.0
 
 - Added optional closed-eye images for closed and open mouth
