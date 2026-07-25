@@ -1,3 +1,4 @@
+#include "animation-state.hpp"
 #include "blink-state.hpp"
 #include "mouth-state.hpp"
 
@@ -5,6 +6,8 @@
 #include <cmath>
 #include <iostream>
 
+using mascot::AnimationSettings;
+using mascot::AnimationState;
 using mascot::BlinkSettings;
 using mascot::BlinkState;
 using mascot::MouthLevel;
@@ -108,6 +111,37 @@ static void blink_sanitizes_settings()
   assert(!blink.is_blinking());
 }
 
+static void speech_animation_changes_transform()
+{
+  AnimationState animation;
+  animation.update(1.0F, true, 16.0F);
+  assert(animation.frame().offset_y < 0.0F);
+  assert(animation.frame().scale_x < 1.0F);
+  assert(animation.frame().scale_y > 1.0F);
+}
+
+static void idle_animation_breathes()
+{
+  AnimationState animation;
+  animation.update(0.0F, false, 100.0F);
+  assert(animation.frame().scale_x < 1.0F);
+  assert(animation.frame().scale_y > 1.0F);
+}
+
+static void animation_sanitizes_settings()
+{
+  AnimationSettings settings;
+  settings.bounce_pixels = -1.0F;
+  settings.stretch_percent = 50.0F;
+  settings.tilt_degrees = std::nanf("");
+  settings.idle_speed = 0.0F;
+  AnimationState animation(settings);
+  assert(animation.settings().bounce_pixels == 0.0F);
+  assert(animation.settings().stretch_percent == 10.0F);
+  assert(animation.settings().tilt_degrees == 1.5F);
+  assert(animation.settings().idle_speed == 0.05F);
+}
+
 int main()
 {
   opens_at_threshold();
@@ -119,6 +153,9 @@ int main()
   smoothing_delays_fast_changes();
   blink_uses_interval_and_duration();
   blink_sanitizes_settings();
+  speech_animation_changes_transform();
+  idle_animation_breathes();
+  animation_sanitizes_settings();
   std::cout << "All core tests passed\n";
   return 0;
 }

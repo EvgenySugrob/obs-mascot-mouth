@@ -5,20 +5,22 @@ closed, half-open, and wide-open mouth PNG images using the level of an existing
 OBS audio source. It does not open the microphone a second time and does not
 require a captured helper window.
 
-## Version 0.3.0
+## Version 0.4.0
 
 - native C++17 OBS input source;
 - audio source selection from the source properties;
 - three mouth levels driven by microphone volume;
 - six image slots for mouth and eye combinations;
 - configurable mouth smoothing;
-- subtle voice-reactive movement and scale;
+- automatic speaking bounce driven by microphone volume;
+- voice-reactive squash, stretch, and tilt;
+- optional idle breathing animation;
 - automatic blinking with randomized intervals;
 - configurable blink interval and duration;
 - separate close, open, and wide-open thresholds;
 - configurable close delay;
 - Russian and English UI;
-- dependency-free tests for the mouth and blink state machines.
+- dependency-free tests for mouth, blink, and animation state machines.
 
 All PNG files should use the same canvas size and character position. If their
 sizes differ, the OBS source reports the largest width and height and draws the
@@ -35,8 +37,9 @@ available speaking state.
 6. Start with `-42 dB` for closing, `-35 dB` for opening, `-22 dB` for wide
    opening, `120 ms` for the close delay, and `80 ms` for smoothing.
 7. Start with a blink interval of `3500–6500 ms` and a duration of `120 ms`.
-8. Enable movement with `4 px` vertical offset and `1.5%` scale.
-9. Raise the open threshold toward `0 dB` if background noise opens the mouth.
+8. Enable voice animation with `4 px` bounce, `1.5%` stretch, and `1.5°` tilt.
+9. Enable idle breathing with `0.6%` strength and `0.25` speed.
+10. Raise the open threshold toward `0 dB` if background noise opens the mouth.
    Lower it toward `-60 dB` if normal speech is not detected.
 
 Audio filters placed on the selected OBS source are included in the level seen
@@ -92,6 +95,7 @@ The state-machine core can also be compiled directly:
 
 ```sh
 c++ -std=c++17 -Isrc src/mouth-state.cpp src/blink-state.cpp \
+  src/animation-state.cpp \
   tests/mouth-state-test.cpp -o mouth-tests
 ./mouth-tests
 ```
@@ -99,9 +103,10 @@ c++ -std=c++17 -Isrc src/mouth-state.cpp src/blink-state.cpp \
 ## Design notes
 
 The OBS volume-meter callback only calculates the loudest channel and writes a
-single atomic float. Smoothing, mouth states, blinking, and voice motion run
-during `video_tick`. Textures are loaded once and rendered directly by OBS. No
-audio buffers are copied and no per-frame heap allocation is performed.
+single atomic float. Smoothing, mouth states, blinking, idle breathing, and
+voice motion run during `video_tick`. Textures are loaded once and rendered
+directly by OBS. No audio buffers are copied and no per-frame heap allocation
+is performed.
 
 ## License
 

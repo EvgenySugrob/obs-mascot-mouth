@@ -25,6 +25,10 @@ constexpr const char *kBlinkDuration = "blink_duration_ms";
 constexpr const char *kMotionEnabled = "motion_enabled";
 constexpr const char *kMotionOffset = "motion_offset_pixels";
 constexpr const char *kMotionScale = "motion_scale_percent";
+constexpr const char *kMotionTilt = "motion_tilt_degrees";
+constexpr const char *kIdleEnabled = "idle_enabled";
+constexpr const char *kIdleAmount = "idle_amount_percent";
+constexpr const char *kIdleSpeed = "idle_speed";
 
 constexpr const char *kImageFilter = "PNG Files (*.png);;All Files (*.*)";
 
@@ -59,12 +63,7 @@ MascotSource::~MascotSource()
   obs_enter_graphics();
   {
     std::lock_guard<std::mutex> lock(image_mutex_);
-    free_image(closed_);
-    free_image(medium_);
-    free_image(open_);
-    free_image(closed_blink_);
-    free_image(medium_blink_);
-    free_image(open_blink_);
+    free_image_set(images_);
   }
   obs_leave_graphics();
 }
@@ -101,6 +100,16 @@ void MascotSource::load_image(Image &image, const char *path)
   obs_leave_graphics();
 }
 
+void MascotSource::free_image_set(ImageSet &set)
+{
+  free_image(set.closed);
+  free_image(set.medium);
+  free_image(set.open);
+  free_image(set.closed_blink);
+  free_image(set.medium_blink);
+  free_image(set.open_blink);
+}
+
 void MascotSource::attach_meter(const char *source_name_value)
 {
   if (!meter_)
@@ -112,11 +121,13 @@ void MascotSource::attach_meter(const char *source_name_value)
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     mouth_.reset();
+    animation_.reset();
     previous_mouth_level_ = MouthLevel::Closed;
-    motion_impulse_ = 0.0F;
     render_mouth_level_.store(static_cast<int>(MouthLevel::Closed), std::memory_order_relaxed);
     render_offset_y_.store(0.0F, std::memory_order_relaxed);
-    render_scale_.store(1.0F, std::memory_order_relaxed);
+    render_scale_x_.store(1.0F, std::memory_order_relaxed);
+    render_scale_y_.store(1.0F, std::memory_order_relaxed);
+    render_rotation_.store(0.0F, std::memory_order_relaxed);
   }
 
   if (!source_name_value || !*source_name_value)
@@ -157,23 +168,32 @@ void MascotSource::update(obs_data_t *settings)
   blink_settings.maximum_interval_ms =
       static_cast<float>(obs_data_get_int(settings, kBlinkMaximumInterval));
   blink_settings.duration_ms = static_cast<float>(obs_data_get_int(settings, kBlinkDuration));
+  AnimationSettings animation_settings;
+  animation_settings.speech_enabled = obs_data_get_bool(settings, kMotionEnabled);
+  animation_settings.bounce_pixels = static_cast<float>(obs_data_get_int(settings, kMotionOffset));
+  animation_settings.stretch_percent =
+      static_cast<float>(obs_data_get_double(settings, kMotionScale));
+  animation_settings.tilt_degrees =
+      static_cast<float>(obs_data_get_double(settings, kMotionTilt));
+  animation_settings.idle_enabled = obs_data_get_bool(settings, kIdleEnabled);
+  animation_settings.idle_amount_percent =
+      static_cast<float>(obs_data_get_double(settings, kIdleAmount));
+  animation_settings.idle_speed = static_cast<float>(obs_data_get_double(settings, kIdleSpeed));
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     mouth_.configure(mouth_settings);
     blink_.configure(blink_settings);
+    animation_.configure(animation_settings);
     blinking_enabled_ = obs_data_get_bool(settings, kBlinkEnabled);
-    motion_enabled_ = obs_data_get_bool(settings, kMotionEnabled);
-    motion_offset_pixels_ = static_cast<float>(obs_data_get_int(settings, kMotionOffset));
-    motion_scale_percent_ = static_cast<float>(obs_data_get_double(settings, kMotionScale));
     render_blink_.store(false, std::memory_order_relaxed);
   }
 
-  load_image(closed_, obs_data_get_string(settings, kClosedImage));
-  load_image(medium_, obs_data_get_string(settings, kMediumImage));
-  load_image(open_, obs_data_get_string(settings, kOpenImage));
-  load_image(closed_blink_, obs_data_get_string(settings, kClosedBlinkImage));
-  load_image(medium_blink_, obs_data_get_string(settings, kMediumBlinkImage));
-  load_image(open_blink_, obs_data_get_string(settings, kOpenBlinkImage));
+  load_image(images_.closed, obs_data_get_string(settings, kClosedImage));
+  load_image(images_.medium, obs_data_get_string(settings, kMediumImage));
+  load_image(images_.open, obs_data_get_string(settings, kOpenImage));
+  load_image(images_.closed_blink, obs_data_get_string(settings, kClosedBlinkImage));
+  load_image(images_.medium_blink, obs_data_get_string(settings, kMediumBlinkImage));
+  load_image(images_.open_blink, obs_data_get_string(settings, kOpenBlinkImage));
   attach_meter(obs_data_get_string(settings, kAudioSource));
 }
 
@@ -200,18 +220,16 @@ void MascotSource::tick(float seconds)
   if (blinking_enabled_)
     blink_.update(elapsed_ms);
   const MouthLevel mouth_level = mouth_.level();
-  if (motion_enabled_ && mouth_level != previous_mouth_level_ &&
-      mouth_level != MouthLevel::Closed)
-    motion_impulse_ = 1.0F;
-  motion_impulse_ *= std::exp(-std::max(seconds, 0.0F) * 10.0F);
-  const float motion =
-      motion_enabled_ ? std::clamp(mouth_.activity() * 0.35F + motion_impulse_ * 0.65F, 0.0F, 1.0F)
-                      : 0.0F;
+  const bool emphasis =
+      mouth_level != previous_mouth_level_ && mouth_level != MouthLevel::Closed;
+  animation_.update(mouth_.activity(), emphasis, elapsed_ms);
+  const AnimationFrame &frame = animation_.frame();
   render_mouth_level_.store(static_cast<int>(mouth_level), std::memory_order_relaxed);
   render_blink_.store(blinking_enabled_ && blink_.is_blinking(), std::memory_order_relaxed);
-  render_offset_y_.store(-motion_offset_pixels_ * motion, std::memory_order_relaxed);
-  render_scale_.store(1.0F + motion_scale_percent_ * 0.01F * motion,
-                      std::memory_order_relaxed);
+  render_offset_y_.store(frame.offset_y, std::memory_order_relaxed);
+  render_scale_x_.store(frame.scale_x, std::memory_order_relaxed);
+  render_scale_y_.store(frame.scale_y, std::memory_order_relaxed);
+  render_rotation_.store(frame.rotation_radians, std::memory_order_relaxed);
   previous_mouth_level_ = mouth_level;
 }
 
@@ -221,23 +239,9 @@ void MascotSource::render(gs_effect_t *effect)
   const MouthLevel mouth_level =
       static_cast<MouthLevel>(render_mouth_level_.load(std::memory_order_relaxed));
   const bool is_blinking = render_blink_.load(std::memory_order_relaxed);
-  Image *normal = &closed_;
-  Image *blink = &closed_blink_;
-  Image *alternate_normal = &open_;
-  Image *alternate_blink = &closed_blink_;
-  if (mouth_level == MouthLevel::Medium) {
-    normal = &medium_;
-    blink = &medium_blink_;
-    alternate_normal = &open_;
-    alternate_blink = &open_blink_;
-  } else if (mouth_level == MouthLevel::Wide) {
-    normal = &open_;
-    blink = &open_blink_;
-    alternate_normal = &medium_;
-    alternate_blink = &medium_blink_;
-  }
-  Image *candidates[] = {is_blinking ? blink : normal, is_blinking ? alternate_blink : normal,
-                         normal, alternate_normal, &closed_, &open_};
+  Image &normal = normal_image(images_, mouth_level);
+  Image &blink = blink_image(images_, mouth_level);
+  Image *candidates[] = {is_blinking ? &blink : &normal, &normal, &images_.open, &images_.closed};
   gs_image_file *image = nullptr;
   for (Image *candidate : candidates) {
     gs_image_file *file = image_file(*candidate);
@@ -251,13 +255,16 @@ void MascotSource::render(gs_effect_t *effect)
 
   gs_eparam_t *parameter = gs_effect_get_param_by_name(effect, "image");
   gs_effect_set_texture(parameter, image->texture);
-  const float scale = render_scale_.load(std::memory_order_relaxed);
+  const float scale_x = render_scale_x_.load(std::memory_order_relaxed);
+  const float scale_y = render_scale_y_.load(std::memory_order_relaxed);
+  const float rotation = render_rotation_.load(std::memory_order_relaxed);
   const float offset_y = render_offset_y_.load(std::memory_order_relaxed);
   const float center_x = static_cast<float>(image->cx) * 0.5F;
   const float center_y = static_cast<float>(image->cy) * 0.5F;
   gs_matrix_push();
   gs_matrix_translate3f(center_x, center_y + offset_y, 0.0F);
-  gs_matrix_scale3f(scale, scale, 1.0F);
+  gs_matrix_rotaa4f(0.0F, 0.0F, 1.0F, rotation);
+  gs_matrix_scale3f(scale_x, scale_y, 1.0F);
   gs_matrix_translate3f(-center_x, -center_y, 0.0F);
   gs_draw_sprite(image->texture, 0, image->cx, image->cy);
   gs_matrix_pop();
@@ -266,17 +273,45 @@ void MascotSource::render(gs_effect_t *effect)
 uint32_t MascotSource::width() const
 {
   std::lock_guard<std::mutex> lock(image_mutex_);
-  return std::max({image_file(closed_)->cx, image_file(medium_)->cx, image_file(open_)->cx,
-                   image_file(closed_blink_)->cx, image_file(medium_blink_)->cx,
-                   image_file(open_blink_)->cx});
+  return image_set_width(images_);
 }
 
 uint32_t MascotSource::height() const
 {
   std::lock_guard<std::mutex> lock(image_mutex_);
-  return std::max({image_file(closed_)->cy, image_file(medium_)->cy, image_file(open_)->cy,
-                   image_file(closed_blink_)->cy, image_file(medium_blink_)->cy,
-                   image_file(open_blink_)->cy});
+  return image_set_height(images_);
+}
+
+MascotSource::Image &MascotSource::normal_image(ImageSet &set, MouthLevel level) noexcept
+{
+  if (level == MouthLevel::Medium)
+    return set.medium;
+  if (level == MouthLevel::Wide)
+    return set.open;
+  return set.closed;
+}
+
+MascotSource::Image &MascotSource::blink_image(ImageSet &set, MouthLevel level) noexcept
+{
+  if (level == MouthLevel::Medium)
+    return set.medium_blink;
+  if (level == MouthLevel::Wide)
+    return set.open_blink;
+  return set.closed_blink;
+}
+
+uint32_t MascotSource::image_set_width(const ImageSet &set) noexcept
+{
+  return std::max({image_file(set.closed)->cx, image_file(set.medium)->cx,
+                   image_file(set.open)->cx, image_file(set.closed_blink)->cx,
+                   image_file(set.medium_blink)->cx, image_file(set.open_blink)->cx});
+}
+
+uint32_t MascotSource::image_set_height(const ImageSet &set) noexcept
+{
+  return std::max({image_file(set.closed)->cy, image_file(set.medium)->cy,
+                   image_file(set.open)->cy, image_file(set.closed_blink)->cy,
+                   image_file(set.medium_blink)->cy, image_file(set.open_blink)->cy});
 }
 
 bool MascotSource::enum_audio_sources(void *data, obs_source_t *source)
@@ -332,6 +367,15 @@ obs_properties_t *MascotSource::properties(void *)
                                 1);
   obs_properties_add_float_slider(properties, kMotionScale, obs_module_text("MotionScale"), 0.0,
                                   5.0, 0.1);
+  obs_properties_add_float_slider(properties, kMotionTilt, obs_module_text("MotionTilt"), 0.0,
+                                  10.0, 0.1);
+  obs_properties_add_bool(properties, kIdleEnabled, obs_module_text("IdleEnabled"));
+  obs_properties_add_float_slider(properties, kIdleAmount, obs_module_text("IdleAmount"), 0.0, 3.0,
+                                  0.1);
+  obs_properties_add_float_slider(properties, kIdleSpeed, obs_module_text("IdleSpeed"), 0.05, 1.0,
+                                  0.05);
+  obs_properties_add_text(properties, "animation_hint", obs_module_text("AnimationHint"),
+                          OBS_TEXT_INFO);
   return properties;
 }
 
@@ -356,6 +400,10 @@ void MascotSource::defaults(obs_data_t *settings)
   obs_data_set_default_bool(settings, kMotionEnabled, true);
   obs_data_set_default_int(settings, kMotionOffset, 4);
   obs_data_set_default_double(settings, kMotionScale, 1.5);
+  obs_data_set_default_double(settings, kMotionTilt, 1.5);
+  obs_data_set_default_bool(settings, kIdleEnabled, true);
+  obs_data_set_default_double(settings, kIdleAmount, 0.6);
+  obs_data_set_default_double(settings, kIdleSpeed, 0.25);
 }
 
 obs_source_info MascotSource::source_info()

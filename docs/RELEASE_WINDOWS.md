@@ -6,8 +6,8 @@ already configured.
 Set the local paths before running the commands:
 
 ```powershell
-$obsSource = "C:\dev\obs-studio"
-$releaseDirectory = "C:\dev\releases"
+$obsSource = "F:\dev\obs-studio"
+$releaseDirectory = "F:\dev\releases"
 ```
 
 ## Update the repository
@@ -34,19 +34,19 @@ cmake --build --preset windows-x64 --config Release --target obs-mascot-mouth
 Close OBS Studio. For the recommended per-machine layout:
 
 ```powershell
-$plugin = "$env:ProgramData\obs-studio\plugins\obs-mascot-mouth"
+$obsInstall = "D:\Programs\obs-studio"
 
-New-Item -ItemType Directory -Force "$plugin\bin\64bit"
-New-Item -ItemType Directory -Force "$plugin\data\locale"
+New-Item -ItemType Directory -Force "$obsInstall\obs-plugins\64bit"
+New-Item -ItemType Directory -Force "$obsInstall\data\obs-plugins\obs-mascot-mouth\locale"
 
 Copy-Item `
   "$obsSource\build_x64\plugins\obs-mascot-mouth\Release\obs-mascot-mouth.dll" `
-  "$plugin\bin\64bit\obs-mascot-mouth.dll" `
+  "$obsInstall\obs-plugins\64bit\obs-mascot-mouth.dll" `
   -Force
 
 Copy-Item `
   "$obsSource\plugins\obs-mascot-mouth\data\locale\*" `
-  "$plugin\data\locale\" `
+  "$obsInstall\data\obs-plugins\obs-mascot-mouth\locale\" `
   -Force
 ```
 
@@ -60,25 +60,24 @@ For a custom or portable OBS installation, copy the DLL and locale files to:
 ## Package
 
 ```powershell
-$stage = "$releaseDirectory\obs-mascot-mouth-0.3.0"
-$package = "$stage\obs-mascot-mouth"
+$stage = "$releaseDirectory\obs-mascot-mouth-0.4.0"
 
-New-Item -ItemType Directory -Force "$package\bin\64bit"
-New-Item -ItemType Directory -Force "$package\data\locale"
+New-Item -ItemType Directory -Force "$stage\obs-plugins\64bit"
+New-Item -ItemType Directory -Force "$stage\data\obs-plugins\obs-mascot-mouth\locale"
 
 Copy-Item `
   "$obsSource\build_x64\plugins\obs-mascot-mouth\Release\obs-mascot-mouth.dll" `
-  "$package\bin\64bit\obs-mascot-mouth.dll" `
+  "$stage\obs-plugins\64bit\obs-mascot-mouth.dll" `
   -Force
 
 Copy-Item `
   "$obsSource\plugins\obs-mascot-mouth\data\locale\*" `
-  "$package\data\locale\" `
+  "$stage\data\obs-plugins\obs-mascot-mouth\locale\" `
   -Force
 
 Compress-Archive `
-  -Path "$package" `
-  -DestinationPath "$releaseDirectory\obs-mascot-mouth-0.3.0-windows-x64.zip" `
+  -Path "$stage\*" `
+  -DestinationPath "$releaseDirectory\obs-mascot-mouth-0.4.0-windows-x64.zip" `
   -Force
 ```
 
@@ -93,6 +92,9 @@ Mouth smoothing: 80 ms
 Minimum blink interval: 3500 ms
 Maximum blink interval: 6500 ms
 Blink duration: 120 ms
-Maximum vertical movement: 4 px
-Maximum scale increase: 1.5%
+Maximum speaking bounce: 4 px
+Maximum speaking stretch: 1.5%
+Maximum speaking tilt: 1.5°
+Idle breathing amount: 0.6%
+Idle breathing speed: 0.25
 ```

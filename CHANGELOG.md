@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Added automatic speaking bounce driven by microphone activity
+- Added voice-reactive squash, stretch, and tilt
+- Added optional idle breathing animation
+- Added controls for bounce, stretch, tilt, breathing strength, and speed
+- Added dependency-free animation state tests
+
 ## 0.3.0
 
 - Added half-open mouth and matching blink image slots
